@@ -46,14 +46,14 @@ load_dotenv(override=True)
 if os.getenv("ANTHROPIC_BASE_URL"):
     os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
 
-client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
+client = None
 MODEL = os.environ["MODEL_ID"]
 
-SYSTEM = f"You are a coding agent at {os.getcwd()}. Use bash to solve tasks. Act, don't explain."
+SYSTEM = f"You are a coding agent at {os.getcwd()}. Use powershell to solve tasks. Act, don't explain."
 
 TOOLS = [{
-    "name": "bash",
-    "description": "Run a shell command.",
+    "name": "powershell",
+    "description": "Run a PowerShell command.",
     "input_schema": {
         "type": "object",
         "properties": {"command": {"type": "string"}},
@@ -62,12 +62,19 @@ TOOLS = [{
 }]
 
 
-def run_bash(command: str) -> str:
+def get_client():
+    global client
+    if client is None:
+        client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
+    return client
+
+
+def run_powershell(command: str) -> str:
     dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
     if any(d in command for d in dangerous):
         return "Error: Dangerous command blocked"
     try:
-        r = subprocess.run(command, shell=True, cwd=os.getcwd(),
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", command], cwd=os.getcwd(),
                            capture_output=True, text=True, timeout=120)
         out = (r.stdout + r.stderr).strip()
         return out[:50000] if out else "(no output)"
@@ -80,7 +87,7 @@ def run_bash(command: str) -> str:
 # -- The core pattern: a while loop that calls tools until the model stops --
 def agent_loop(messages: list):
     while True:
-        response = client.messages.create(
+        response = get_client().messages.create(
             model=MODEL, system=SYSTEM, messages=messages,
             tools=TOOLS, max_tokens=8000,
         )
@@ -94,7 +101,7 @@ def agent_loop(messages: list):
         for block in response.content:
             if block.type == "tool_use":
                 print(f"\033[33m$ {block.input['command']}\033[0m")
-                output = run_bash(block.input["command"])
+                output = run_powershell(block.input["command"])
                 print(output[:200])
                 results.append({"type": "tool_result", "tool_use_id": block.id,
                                 "content": output})
